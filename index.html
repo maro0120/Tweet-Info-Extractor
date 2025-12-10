@@ -43,12 +43,6 @@
             <button class="copy-button" onclick="copyToClipboard()">コピー</button>
         </div>
     </div>
-    
-    <div id="quotedCard" class="card" style="display:none;">
-        <h3>引用ポスト情報</h3>
-        <div id="quotedOutput" class="info-display"></div>
-    </div>
-
 
     <script>
         // Service Worker登録
@@ -83,7 +77,6 @@
                 
                 const data = await response.json();
                 
-                // メインツイートと引用ツイートの両方を処理
                 const mainTweet = data.tweet;
                 const quotedTweet = data.tweet.quote ? data.tweet.quote : null;
 
@@ -119,20 +112,35 @@
                 }).replace(/\//g, '/').replace(' ', ' ');
             };
 
+            // URLのクエリパラメータを削除する関数
+            const cleanUrl = (url) => {
+                try {
+                    const parsedUrl = new URL(url);
+                    // ほとんどの場合、クエリパラメータを削除するだけで良い
+                    return parsedUrl.origin + parsedUrl.pathname;
+                } catch (e) {
+                    return url; // パースに失敗したら元のURLを返す
+                }
+            };
+
+
             const getMediaUrls = (media) => {
                 let urls = [];
                 if (media && media.photos) {
-                    urls = urls.concat(media.photos.map(p => p.url));
+                    // **ここを修正:** photo.urlをcleanUrlに通す
+                    urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
                 }
                 if (media && media.video) {
-                    // FixTweetは通常、最も質の良い動画URLを返す
-                    urls.push(media.video.url); 
+                    // 動画URLもcleanUrlに通す
+                    urls.push(cleanUrl(media.video.url)); 
                 }
+                
                 // YouTubeのサムネとURLは本文からの抽出に頼る
                 const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
                 const ytMatch = tweet.text.match(ytRegex);
                 if (ytMatch) {
                     const videoId = ytMatch[2];
+                    // YouTubeサムネイルは元々クエリパラメータを持たないクリーンなURLを生成
                     const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
                     urls.push(`[YouTube URL] ${ytMatch[0]}`);
                     urls.push(`[YouTube サムネ] ${ytThumb}`);
@@ -144,48 +152,44 @@
             // メインツイート整形
             // ------------------
             
-            // 形式: yokotaro @yokotaro (2025/12/10 10:09:49) （◎血◎） https://x.com/yokotaro/status/1998560752043753860
             let output = '';
 
             const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
             const mainBodyLine = tweet.text;
-            const mainUrlLine = tweet.url;
+            const mainUrlLine = tweet.url; // ツイート自体のURLはパラメータを削除しない
             const mainMediaLine = getMediaUrls(tweet.media);
 
-            output += mainUserLine + ' ' + mainBodyLine + '\n' + mainUrlLine;
+            output += mainUserLine + '\n' + mainBodyLine + '\n' + mainUrlLine;
             if (mainMediaLine) {
-                 output += '\n\n[添付メディア]\n' + mainMediaLine;
+                 output += '\n\n' + mainMediaLine;
             }
 
             // ------------------
             // 引用ポストの処理
             // ------------------
             if (quotedTweet) {
-                // 引用ポストの情報の追加
                 const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
                 const quotedBodyLine = quotedTweet.text;
                 const quotedUrlLine = quotedTweet.url;
                 const quotedMediaLine = getMediaUrls(quotedTweet.media);
                 
                 output += '\n\n[引用ポスト]\n';
-                output += quotedUserLine + ' ' + quotedBodyLine + '\n' + quotedUrlLine;
+                output += quotedUserLine + '\n' + quotedBodyLine + '\n' + quotedUrlLine;
                 if (quotedMediaLine) {
-                    output += '\n\n[引用ポスト添付メディア]\n' + quotedMediaLine;
+                    output += '\n\n' + quotedMediaLine;
                 }
             }
 
             return output.trim();
         }
 
-        // コピー処理
+        // コピー処理 (前回のものと変更なし)
         function copyToClipboard() {
             const content = document.getElementById('formattedOutput').textContent;
             
-            // navigator.clipboard.writeTextが最も現代的な方法
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(content).then(() => {
                     alert('内容がクリップボードにコピーされました！');
-                    // ボタンのテキストを一時的に変更してフィードバック
                     const btn = document.querySelector('.copy-button');
                     const originalText = btn.textContent;
                     btn.textContent = 'コピー完了！';
@@ -197,7 +201,6 @@
                     alert('コピーに失敗しました。手動でコピーしてください。');
                 });
             } else {
-                // 古い環境のためのフォールバック（iOS Safariなどでは動作しない可能性あり）
                 const textarea = document.createElement('textarea');
                 textarea.value = content;
                 document.body.appendChild(textarea);
