@@ -1,0 +1,25 @@
+{
+  "name": "Tweet Info Extractor",
+  "short_name": "TweetInfo",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1da1f2",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192/1da1f2/ffffff?text=Icon", 
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "share_target": {
+    "action": "./index.html",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}
