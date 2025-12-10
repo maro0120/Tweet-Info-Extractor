@@ -6,59 +6,49 @@
     <title>ツイート詳細取得</title>
     <link rel="manifest" href="manifest.json">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: #f5f8fa; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); word-break: break-all; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; background: #f5f8fa; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); word-break: break-all; margin-bottom: 20px; }
         h2 { margin-top: 0; font-size: 18px; border-bottom: 2px solid #e1e8ed; padding-bottom: 10px; }
-        .field { margin-bottom: 15px; }
-        .label { font-weight: bold; color: #657786; font-size: 12px; display: block; margin-bottom: 4px; }
-        .value { font-size: 14px; color: #14171a; white-space: pre-wrap; }
-        img.preview { max-width: 100%; border-radius: 8px; margin-top: 5px; border: 1px solid #ddd; }
+        .info-display { white-space: pre-wrap; font-size: 14px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+        .copy-button { 
+            background-color: #1da1f2; 
+            color: white; 
+            border: none; 
+            padding: 8px 15px; 
+            font-size: 14px; 
+            border-radius: 20px; 
+            cursor: pointer; 
+            margin-top: 15px;
+            float: right;
+            transition: background-color 0.2s;
+        }
+        .copy-button:hover { background-color: #0c85d0; }
+        .copy-button:active { background-color: #096ba1; }
         .error { color: red; font-weight: bold; }
         .loading { color: #1da1f2; font-weight: bold; }
+        .quoted-tweet { margin-top: 20px; padding: 15px; border-left: 5px solid #1da1f2; background: #eef5ff; border-radius: 6px; }
+        .quoted-tweet .title { font-weight: bold; color: #1da1f2; margin-bottom: 10px; }
+        .clearfix::after { content: ""; clear: both; display: table; }
+
     </style>
 </head>
 <body>
 
-    <div class="card">
+    <div class="card clearfix">
         <h2>ツイート情報抽出</h2>
         <div id="status" class="loading">待機中...</div>
         
         <div id="result" style="display:none;">
-            <div class="field">
-                <span class="label">ユーザー名</span>
-                <div class="value" id="userName"></div>
-            </div>
-            <div class="field">
-                <span class="label">Twitter ID</span>
-                <div class="value" id="userId"></div>
-            </div>
-            <div class="field">
-                <span class="label">投稿日時 (絶対時刻)</span>
-                <div class="value" id="postDate"></div>
-            </div>
-            <div class="field">
-                <span class="label">本文</span>
-                <div class="value" id="bodyText"></div>
-            </div>
-            <div class="field">
-                <span class="label">添付画像 URL</span>
-                <div class="value" id="imageUrls"></div>
-                <div id="imagePreviews"></div>
-            </div>
-            <div class="field">
-                <span class="label">YouTube URL</span>
-                <div class="value" id="youtubeUrl">-</div>
-            </div>
-            <div class="field">
-                <span class="label">YouTube サムネイル</span>
-                <div id="youtubeThumbPreview"></div>
-            </div>
-            <div class="field">
-                <span class="label">元ツイートURL</span>
-                <div class="value" id="originalUrl"></div>
-            </div>
+            <div id="formattedOutput" class="info-display"></div>
+            <button class="copy-button" onclick="copyToClipboard()">コピー</button>
         </div>
     </div>
+    
+    <div id="quotedCard" class="card" style="display:none;">
+        <h3>引用ポスト情報</h3>
+        <div id="quotedOutput" class="info-display"></div>
+    </div>
+
 
     <script>
         // Service Worker登録
@@ -66,17 +56,14 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             const params = new URLSearchParams(window.location.search);
-            // Share Targetは text か url パラメータにURLを入れてくることが多い
             const sharedText = params.get('text') || '';
             const sharedUrl = params.get('url') || '';
             
-            // テキスト内からURLを探す正規表現
             const urlRegex = /(https?:\/\/(?:twitter\.com|x\.com)\/[a-zA-Z0-9_]+\/status\/[0-9]+)/;
             const match = (sharedUrl + " " + sharedText).match(urlRegex);
 
             if (match) {
                 const tweetUrl = match[0];
-                document.getElementById('originalUrl').textContent = tweetUrl;
                 fetchTweetData(tweetUrl);
             } else {
                 document.getElementById('status').textContent = "TwitterのURLが見つかりませんでした。共有メニューからツイートを共有してください。";
@@ -87,94 +74,142 @@
             document.getElementById('status').textContent = "データ取得中...";
             
             try {
-                // URLからツイートIDとユーザー名を抽出
-                // 形式: https://x.com/username/status/123456789
                 const parts = url.split('/');
-                const tweetId = parts[parts.length - 1].split('?')[0]; // クエリパラメータ除去
-                
-                // FixTweet APIを使用 (非公式ですが強力なAPIです)
+                const tweetId = parts[parts.length - 1].split('?')[0];
                 const apiUrl = `https://api.fxtwitter.com/status/${tweetId}`;
                 
                 const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error('API Error');
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
                 
                 const data = await response.json();
-                const tweet = data.tweet;
+                
+                // メインツイートと引用ツイートの両方を処理
+                const mainTweet = data.tweet;
+                const quotedTweet = data.tweet.quote ? data.tweet.quote : null;
 
-                renderData(tweet, url);
+                const formattedText = formatTweet(mainTweet, quotedTweet);
+                document.getElementById('formattedOutput').textContent = formattedText;
+                
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('result').style.display = 'block';
 
             } catch (e) {
                 console.error(e);
                 document.getElementById('status').innerHTML = `<span class="error">取得に失敗しました。<br>エラー: ${e.message}</span>`;
             }
         }
-
-        function renderData(tweet, originalUrl) {
-            document.getElementById('status').style.display = 'none';
-            document.getElementById('result').style.display = 'block';
-
-            // 1. ユーザー名
-            document.getElementById('userName').textContent = tweet.author.name;
-
-            // 2. Twitter ID
-            document.getElementById('userId').textContent = `@${tweet.author.screen_name}`;
-
-            // 3. 投稿日時 (Unix Timeから変換)
-            // tweet.created_at は ISO形式 または timestamp
-            const date = new Date(tweet.created_timestamp * 1000); 
-            document.getElementById('postDate').textContent = date.toLocaleString('ja-JP');
-
-            // 4. 本文
-            document.getElementById('bodyText').textContent = tweet.text;
-
-            // 5. 添付画像
-            const imgContainer = document.getElementById('imagePreviews');
-            const imgUrlContainer = document.getElementById('imageUrls');
-            imgContainer.innerHTML = '';
-            imgUrlContainer.textContent = '';
+        
+        // ツイート情報を整形して文字列を生成する関数
+        function formatTweet(tweet, quotedTweet = null) {
             
-            if (tweet.media && tweet.media.photos) {
-                tweet.media.photos.forEach(photo => {
-                    // URL表示
-                    const p = document.createElement('div');
-                    p.textContent = photo.url;
-                    imgUrlContainer.appendChild(p);
-                    
-                    // プレビュー表示
-                    const img = document.createElement('img');
-                    img.src = photo.url;
-                    img.className = 'preview';
-                    imgContainer.appendChild(img);
-                });
-            } else {
-                imgUrlContainer.textContent = "なし";
+            // ------------------
+            // ヘルパー関数
+            // ------------------
+            const toJST = (timestamp) => {
+                const date = new Date(timestamp * 1000); 
+                return date.toLocaleString('ja-JP', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                    timeZone: 'Asia/Tokyo'
+                }).replace(/\//g, '/').replace(' ', ' ');
+            };
+
+            const getMediaUrls = (media) => {
+                let urls = [];
+                if (media && media.photos) {
+                    urls = urls.concat(media.photos.map(p => p.url));
+                }
+                if (media && media.video) {
+                    // FixTweetは通常、最も質の良い動画URLを返す
+                    urls.push(media.video.url); 
+                }
+                // YouTubeのサムネとURLは本文からの抽出に頼る
+                const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
+                const ytMatch = tweet.text.match(ytRegex);
+                if (ytMatch) {
+                    const videoId = ytMatch[2];
+                    const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+                    urls.push(`[YouTube URL] ${ytMatch[0]}`);
+                    urls.push(`[YouTube サムネ] ${ytThumb}`);
+                }
+                return urls.join('\n');
+            };
+
+            // ------------------
+            // メインツイート整形
+            // ------------------
+            
+            // 形式: yokotaro @yokotaro (2025/12/10 10:09:49) （◎血◎） https://x.com/yokotaro/status/1998560752043753860
+            let output = '';
+
+            const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            const mainBodyLine = tweet.text;
+            const mainUrlLine = tweet.url;
+            const mainMediaLine = getMediaUrls(tweet.media);
+
+            output += mainUserLine + ' ' + mainBodyLine + '\n' + mainUrlLine;
+            if (mainMediaLine) {
+                 output += '\n\n[添付メディア]\n' + mainMediaLine;
             }
 
-            // 6. YouTube URL & 7. サムネイル
-            // 本文中のURLまたはentitiesからYouTubeを探す
-            let ytUrl = "-";
-            let ytThumb = "";
-            
-            // FixTweetのAPIレスポンスに含まれるURLを走査するか、テキストから正規表現で抽出
-            // 本文から簡易抽出
-            const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
-            const ytMatch = tweet.text.match(ytRegex);
+            // ------------------
+            // 引用ポストの処理
+            // ------------------
+            if (quotedTweet) {
+                // 引用ポストの情報の追加
+                const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
+                const quotedBodyLine = quotedTweet.text;
+                const quotedUrlLine = quotedTweet.url;
+                const quotedMediaLine = getMediaUrls(quotedTweet.media);
+                
+                output += '\n\n[引用ポスト]\n';
+                output += quotedUserLine + ' ' + quotedBodyLine + '\n' + quotedUrlLine;
+                if (quotedMediaLine) {
+                    output += '\n\n[引用ポスト添付メディア]\n' + quotedMediaLine;
+                }
+            }
 
-            if (ytMatch) {
-                ytUrl = ytMatch[0];
-                const videoId = ytMatch[2];
-                // サムネイルの高画質版を生成
-                ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                
-                document.getElementById('youtubeUrl').textContent = ytUrl;
-                
-                const thumbImg = document.createElement('img');
-                thumbImg.src = ytThumb;
-                thumbImg.className = 'preview';
-                document.getElementById('youtubeThumbPreview').appendChild(thumbImg);
+            return output.trim();
+        }
+
+        // コピー処理
+        function copyToClipboard() {
+            const content = document.getElementById('formattedOutput').textContent;
+            
+            // navigator.clipboard.writeTextが最も現代的な方法
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content).then(() => {
+                    alert('内容がクリップボードにコピーされました！');
+                    // ボタンのテキストを一時的に変更してフィードバック
+                    const btn = document.querySelector('.copy-button');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'コピー完了！';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                    }, 1500);
+                }).catch(err => {
+                    console.error('コピー失敗:', err);
+                    alert('コピーに失敗しました。手動でコピーしてください。');
+                });
             } else {
-                document.getElementById('youtubeUrl').textContent = "なし";
-                document.getElementById('youtubeThumbPreview').textContent = "なし";
+                // 古い環境のためのフォールバック（iOS Safariなどでは動作しない可能性あり）
+                const textarea = document.createElement('textarea');
+                textarea.value = content;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    alert('内容がクリップボードにコピーされました！');
+                } catch (err) {
+                    console.error('コピー失敗:', err);
+                    alert('コピーに失敗しました。手動でコピーしてください。');
+                }
+                document.body.removeChild(textarea);
             }
         }
     </script>
