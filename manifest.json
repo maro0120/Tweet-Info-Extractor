@@ -7,7 +7,7 @@
   "theme_color": "#1da1f2",
   "icons": [
     {
-      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAMAAABlApw1AAAAXVBMVEUAAAD///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///8cHHz///+F02E7AAAAHnRSTlMAAAAAAAB/wP+A//8A//////9/f4CAgP////////+A36+OFAAAAFZJREFUeN7t01ERAAAMAjHLv7Q26Qc2UwP1vQ4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8G/HAAf2D77UAAAAASUVORK5CYII=",
+      "src": "./icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png"
     }
