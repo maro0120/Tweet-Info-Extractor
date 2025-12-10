@@ -159,10 +159,11 @@
             const mainUrlLine = tweet.url; // ツイート自体のURLはパラメータを削除しない
             const mainMediaLine = getMediaUrls(tweet.media);
 
-            output += mainUserLine + '\n' + mainBodyLine + '\n' + mainUrlLine;
+            output += mainUserLine + '\n' + mainBodyLine;
             if (mainMediaLine) {
                  output += '\n' + mainMediaLine;
             }
+            output += '\n' + mainUrlLine;
 
             // ------------------
             // 引用ポストの処理
@@ -174,10 +175,11 @@
                 const quotedMediaLine = getMediaUrls(quotedTweet.media);
                 
                 output += '\n\n[引用ポスト]\n';
-                output += quotedUserLine + '\n' + quotedBodyLine + '\n' + quotedUrlLine;
+                output += quotedUserLine + '\n' + quotedBodyLine;
                 if (quotedMediaLine) {
                     output += '\n' + quotedMediaLine;
                 }
+                output += '\n' + quotedUrlLine;
             }
 
             return output.trim();
