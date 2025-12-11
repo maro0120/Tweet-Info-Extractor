@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ツイート詳細取得 (引用/Grok対応版)</title>
+    <title>ツイート詳細取得 (引用対応版)</title>
     <link rel="manifest" href="manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; background: #f5f8fa; }
@@ -71,8 +71,8 @@
                 
                 const data = await response.json();
                 
-                // ★ 修正点: mainTweetとquotedTweetを分離し、両方渡す
                 const mainTweet = data.tweet;
+                // 引用ツイートはAPIの 'quote' プロパティから取得
                 const quotedTweet = data.tweet.quote ? data.tweet.quote : null;
 
                 const formattedText = formatTweet(mainTweet, quotedTweet);
@@ -103,7 +103,7 @@
 
             const cleanUrl = (u) => { try { return new URL(u).origin + new URL(u).pathname; } catch { return u; } };
 
-            const getMediaUrls = (media, text) => {
+            const getMediaUrls = (media) => {
                 let urls = [];
                 if (media && media.photos) {
                     urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
@@ -111,88 +111,31 @@
                 if (media && media.video) {
                     urls.push(cleanUrl(media.video.url)); 
                 }
-                
-                // YouTube extraction
-                const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
-                const ytMatch = text && text.match(ytRegex);
-                if (ytMatch) {
-                    const videoId = ytMatch[2];
-                    const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                    urls.push(`[YouTube URL] ${ytMatch[0]}`);
-                    urls.push(`[YouTube サムネ] ${ytThumb}`);
-                }
                 return urls.join('\n');
             };
 
-            // ------------------
-            // Grokシェアリンクの検出ロジック
-            // ------------------
-            let grokData = null;
-            let grokShareUrl = null;
-
-            if (tweet.entities && tweet.entities.urls) {
-                const grokEntity = tweet.entities.urls.find(u => 
-                    u.expanded_url.includes('/grok/share') || u.expanded_url.includes('/i/grok/')
-                );
-
-                if (grokEntity) {
-                    grokShareUrl = grokEntity.expanded_url;
-                    grokData = {
-                        url: grokShareUrl,
-                        // 質問はリンクカードのタイトル、回答は本文の残りで処理するためdescriptionは参照しない
-                        question: grokEntity.title || '', 
-                        answer: grokEntity.description || '' // OGP長文回答が失敗する場合があるため、ここでは保持するだけ
-                    };
-                }
-            }
-
             // --- 出力生成 ---
             let output = '';
-            const headerInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
 
-            // 1. Grok共有リンクがある場合の特別フォーマットを優先
-            if (grokData) {
-                // Grok URLの正規表現（URL自体を削除するため）
-                const grokUrlRegex = new RegExp(`(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)\\s*`, 'g');
-                
-                // ツイート本文からGrok URLを除去したものを「コメント + 回答」のベースとする
-                let agentContent = tweet.text.replace(grokUrlRegex, '').trim();
+            // 1. メインツイートの整形
+            const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            const mainBodyLine = tweet.text;
+            const mainUrlLine = tweet.url; 
+            const mainMediaLine = getMediaUrls(tweet.media);
 
-                // 質問 (USER): OGPタイトルを使用
-                let questionText = grokData.question.trim() || '(質問内容の取得に失敗しました)';
-                
-                // 回答 (AGENT): URL除去後のツイート本文の残りを全て回答と見なす
-                let answerText = agentContent || '(回答内容がツイート本文に見つかりませんでした)';
-
-                // --- Grok形式のヘッダー行 ---
-                // ヘッダー + ツイート本文の残りの最初の行 + Grok URL の順で出力 (例に合わせる)
-                output += `${headerInfo} ${answerText.split('\n')[0]}... ${grokShareUrl}\n`;
-                
-                // --- Q&A部分 ---
-                output += `\n[USER]\n${questionText}\n`;
-                output += `\n[AGENT]\n${answerText}\n`;
-
-            } else {
-                // 2. Grokリンクがない場合 -> 通常のツイート整形
-                const mainBodyLine = tweet.text;
-                const mainMediaLine = getMediaUrls(tweet.media, tweet.text);
-
-                output += `${headerInfo}\n${mainBodyLine}`;
-                if (mainMediaLine) {
-                     output += '\n' + mainMediaLine;
-                }
+            output += mainUserLine + '\n' + mainBodyLine;
+            if (mainMediaLine) {
+                 output += '\n' + mainMediaLine;
             }
+            output += '\n' + mainUrlLine;
 
-            // 3. 元ツイートのURLを追加 (Grok/通常の両方で)
-            output += `\n${tweet.url}`;
-            
-            // 4. 標準の引用ポストの処理 (メインツイートがGrokではない場合のみ実行)
-            if (!grokData && quotedTweet) {
+            // 2. 引用ポストの処理
+            if (quotedTweet) {
                 const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
                 const quotedBodyLine = quotedTweet.text;
                 const quotedUrlLine = quotedTweet.url;
-                const quotedMediaLine = getMediaUrls(quotedTweet.media, quotedTweet.text);
-
+                const quotedMediaLine = getMediaUrls(quotedTweet.media);
+                
                 output += '\n\n[引用元]\n';
                 output += quotedUserLine + '\n' + quotedBodyLine;
                 if (quotedMediaLine) {
@@ -200,7 +143,7 @@
                 }
                 output += '\n' + quotedUrlLine;
             }
-            
+
             return output.trim();
         }
 
@@ -212,7 +155,12 @@
                 navigator.clipboard.writeText(content).then(() => {
                     alert('コピーしました！');
                 }).catch(err => {
-                    console.error('コピー失敗:', err);
+                    const textarea = document.createElement('textarea');
+                    textarea.value = content;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
                     alert('コピーに失敗しました。手動でコピーしてください。');
                 });
             } else {
