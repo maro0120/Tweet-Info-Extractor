@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ツイート詳細取得 (Grok対応版)</title>
+    <title>ツイート詳細取得 (Grok整形版)</title>
     <link rel="manifest" href="manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; background: #f5f8fa; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); word-break: break-all; margin-bottom: 20px; }
         h2 { margin-top: 0; font-size: 18px; border-bottom: 2px solid #e1e8ed; padding-bottom: 10px; }
-        .info-display { white-space: pre-wrap; font-size: 14px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+        .info-display { white-space: pre-wrap; font-size: 14px; line-height: 1.6; padding: 15px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; color: #333; }
         .copy-button { 
             background-color: #1da1f2; 
             color: white; 
@@ -23,14 +23,9 @@
             transition: background-color 0.2s;
         }
         .copy-button:hover { background-color: #0c85d0; }
-        .copy-button:active { background-color: #096ba1; }
         .error { color: red; font-weight: bold; }
         .loading { color: #1da1f2; font-weight: bold; }
-        
-        .quoted-tweet { margin-top: 20px; padding: 15px; border-left: 5px solid #1da1f2; background: #eef5ff; border-radius: 6px; }
-        .quoted-tweet .title { font-weight: bold; color: #1da1f2; margin-bottom: 10px; }
         .clearfix::after { content: ""; clear: both; display: table; }
-
     </style>
 </head>
 <body>
@@ -58,16 +53,14 @@
             const match = (sharedUrl + " " + sharedText).match(urlRegex);
 
             if (match) {
-                const tweetUrl = match[0];
-                fetchTweetData(tweetUrl);
+                fetchTweetData(match[0]);
             } else {
-                document.getElementById('status').textContent = "TwitterのURLが見つかりませんでした。共有メニューからツイートを共有してください。";
+                document.getElementById('status').textContent = "URLが見つかりません。";
             }
         });
 
         async function fetchTweetData(url) {
             document.getElementById('status').textContent = "データ取得中...";
-            
             try {
                 const parts = url.split('/');
                 const tweetId = parts[parts.length - 1].split('?')[0];
@@ -77,200 +70,94 @@
                 if (!response.ok) throw new Error(`API Error: ${response.status}`);
                 
                 const data = await response.json();
+                const formattedText = formatTweet(data.tweet);
                 
-                const mainTweet = data.tweet;
-                const quotedTweet = data.tweet.quote ? data.tweet.quote : null;
-
-                const formattedText = formatTweet(mainTweet, quotedTweet);
                 document.getElementById('formattedOutput').textContent = formattedText;
-                
                 document.getElementById('status').style.display = 'none';
                 document.getElementById('result').style.display = 'block';
 
             } catch (e) {
                 console.error(e);
-                document.getElementById('status').innerHTML = `<span class="error">取得に失敗しました。<br>エラー: ${e.message}</span>`;
+                document.getElementById('status').innerHTML = `<span class="error">エラー: ${e.message}</span>`;
             }
         }
         
-        // ツイート情報を整形して文字列を生成する関数
-        function formatTweet(tweet, quotedTweet = null) {
-            
-            // ------------------
-            // ヘルパー関数
-            // ------------------
-            const toJST = (timestamp) => {
-                const date = new Date(timestamp * 1000); 
-                return date.toLocaleString('ja-JP', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false,
-                    timeZone: 'Asia/Tokyo'
-                }).replace(/\//g, '/').replace(' ', ' ');
+        function formatTweet(tweet) {
+            // 日時整形
+            const toJST = (ts) => {
+                return new Date(ts * 1000).toLocaleString('ja-JP', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    hour12: false, timeZone: 'Asia/Tokyo'
+                }).replace(/\//g, '/');
             };
 
-            const cleanUrl = (url) => {
-                try {
-                    const parsedUrl = new URL(url);
-                    return parsedUrl.origin + parsedUrl.pathname;
-                } catch (e) {
-                    return url;
+            // URLクリーンアップ
+            const cleanUrl = (u) => { try { return new URL(u).origin + new URL(u).pathname; } catch { return u; } };
+
+            // Grok情報の抽出
+            let grokData = null;
+            // エンティティ(リンクカード情報)からGrokを探す
+            if (tweet.entities && tweet.entities.urls) {
+                const grokEntity = tweet.entities.urls.find(u => 
+                    u.expanded_url.includes('/grok/share') || u.expanded_url.includes('/i/grok/')
+                );
+                if (grokEntity) {
+                    grokData = {
+                        url: grokEntity.expanded_url,
+                        // カードのタイトルが[USER]（質問）、説明文が[AGENT]（回答）になることが多い
+                        question: grokEntity.title || '', 
+                        answer: grokEntity.description || '' 
+                    };
                 }
-            };
+            }
 
-            const getMediaUrls = (media, text) => {
-                let urls = [];
-                if (media && media.photos) {
-                    urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
-                }
-                if (media && media.video) {
-                    urls.push(cleanUrl(media.video.url)); 
-                }
-                
-                const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
-                const ytMatch = text && text.match(ytRegex);
-                if (ytMatch) {
-                    const videoId = ytMatch[2];
-                    const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-                    urls.push(`[YouTube URL] ${ytMatch[0]}`);
-                    urls.push(`[YouTube サムネ] ${ytThumb}`);
-                }
-                return urls.join('\n');
-            };
-
-            // ------------------
-            // Grokシェアリンクの検出ロジック
-            // ------------------
-            const detectGrokLink = (t) => {
-                // ツイート内のURLエンティティを確認
-                // api.fxtwitter.com のレスポンス構造に依存しますが、通常 entities.urls または url.urls にあります
-                const urls = (t.entities && t.entities.urls) || [];
-                
-                // 本文内のURL文字列もチェック（エンティティが漏れる場合の保険）
-                const grokRegex = /(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)/;
-                const textMatch = t.text.match(grokRegex);
-
-                let grokUrl = null;
-                let pageTitle = null;
-
-                // 1. エンティティから探す（タイトル情報が取れる可能性があるため優先）
-                const foundEntity = urls.find(u => u.expanded_url && u.expanded_url.includes('/i/grok/share/'));
-                if (foundEntity) {
-                    grokUrl = foundEntity.expanded_url;
-                    // fxtwitter等はtitleを付与してくれる場合がある
-                    pageTitle = foundEntity.title || null; 
-                } 
-                // 2. エンティティになければテキストから探す
-                else if (textMatch) {
-                    grokUrl = textMatch[0];
-                }
-
-                return { grokUrl, pageTitle };
-            };
-
-            const grokInfo = detectGrokLink(tweet);
-
-            // ------------------
-            // 出力生成
-            // ------------------
+            // --- 出力生成 ---
             let output = '';
 
-            // ★ Grok共有リンクがある場合の特別フォーマット
-            if (grokInfo.grokUrl) {
-                const authorInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            // 1行目: ユーザー名 @ID (日時) 本文(URL含む)
+            // 改行をスペースに置換して1行にまとめるか、本文の改行はそのままにするか。
+            // 指定のフォーマット「(日時) なんだこいつ〜」のように続けて表示します。
+            const headerInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            output += `${headerInfo} ${tweet.text}`;
+
+            // Grok情報がある場合の追加フォーマット
+            if (grokData) {
+                output += '\n\n[USER]\n';
+                output += grokData.question ? grokData.question : '(質問内容の取得に失敗しました)';
                 
-                // 本文からURLを除去して「回答」とする
-                // GrokのURLそのものをテキストから削除して見やすくする
-                let answerText = tweet.text.replace(grokInfo.grokUrl, '').trim();
-
-                output += `[🤖 Grok情報共有] ${authorInfo}\n\n`;
-                
-                // 質問（ページタイトルが取得できていればそれを、なければ仮置き）
-                if (grokInfo.pageTitle) {
-                    output += `[質問]\n${grokInfo.pageTitle}\n\n`;
-                } else {
-                    // タイトルがAPIから取れない場合、手動入力用に枠だけ用意するか、URLだけ表示
-                    output += `[質問]\n(共有リンクを参照)\n\n`;
+                output += '\n\n[AGENT]\n';
+                output += grokData.answer ? grokData.answer : '(回答内容の取得に失敗しました)';
+            } 
+            // Grok以外のメディアURL処理（画像など）
+            else {
+                // 通常のメディア処理が必要ならここに記述（今回はGrok特化のため省略可だが残すなら以下）
+                if (tweet.media) {
+                    if (tweet.media.photos) output += '\n' + tweet.media.photos.map(p => cleanUrl(p.url)).join('\n');
+                    if (tweet.media.video) output += '\n' + cleanUrl(tweet.media.video.url);
                 }
-
-                output += `[回答]\n${answerText}\n\n`;
-                output += `[会話URL]\n${grokInfo.grokUrl}\n`;
-                
-                // Grok以外の添付メディアがあれば追加（稀だがスクショなど）
-                const otherMedia = getMediaUrls(tweet.media, tweet.text);
-                if (otherMedia) {
-                    output += '\n[その他添付]\n' + otherMedia;
-                }
-
-            } else {
-                // ★ 通常のツイート整形（以前のロジック）
-                const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
-                const mainBodyLine = tweet.text;
-                const mainUrlLine = tweet.url; 
-                const mainMediaLine = getMediaUrls(tweet.media, tweet.text);
-
-                output += mainUserLine + '\n' + mainBodyLine;
-                if (mainMediaLine) {
-                     output += '\n' + mainMediaLine;
-                }
-                output += '\n' + mainUrlLine;
             }
 
-            // ------------------
-            // 引用ポストの処理
-            // ------------------
-            if (quotedTweet) {
-                const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
-                const quotedBodyLine = quotedTweet.text;
-                const quotedUrlLine = quotedTweet.url;
-                const quotedMediaLine = getMediaUrls(quotedTweet.media, quotedTweet.text);
-                
-                output += '\n\n[引用元]\n';
-                output += quotedUserLine + '\n' + quotedBodyLine;
-                if (quotedMediaLine) {
-                    output += '\n' + quotedMediaLine;
-                }
-                output += '\n' + quotedUrlLine;
-            }
+            // 最後に元ツイートのURL
+            output += `\n\n${tweet.url}`;
 
-            return output.trim();
+            return output;
         }
 
-        // コピー処理
         function copyToClipboard() {
             const content = document.getElementById('formattedOutput').textContent;
-            
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(content).then(() => {
-                    alert('内容がクリップボードにコピーされました！');
-                    const btn = document.querySelector('.copy-button');
-                    const originalText = btn.textContent;
-                    btn.textContent = 'コピー完了！';
-                    setTimeout(() => {
-                        btn.textContent = originalText;
-                    }, 1500);
-                }).catch(err => {
-                    console.error('コピー失敗:', err);
-                    alert('コピーに失敗しました。手動でコピーしてください。');
-                });
-            } else {
-                const textarea = document.createElement('textarea');
-                textarea.value = content;
-                document.body.appendChild(textarea);
-                textarea.select();
-                try {
-                    document.execCommand('copy');
-                    alert('内容がクリップボードにコピーされました！');
-                } catch (err) {
-                    console.error('コピー失敗:', err);
-                    alert('コピーに失敗しました。手動でコピーしてください。');
-                }
-                document.body.removeChild(textarea);
-            }
+            navigator.clipboard.writeText(content).then(() => {
+                alert('コピーしました！');
+            }).catch(e => {
+                // フォールバック
+                const ta = document.createElement('textarea');
+                ta.value = content;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                alert('コピーしました！');
+            });
         }
     </script>
 </body>
