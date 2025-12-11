@@ -97,17 +97,22 @@
 
             // Grok情報の抽出
             let grokData = null;
+            let grokShareUrl = null;
+
             // エンティティ(リンクカード情報)からGrokを探す
             if (tweet.entities && tweet.entities.urls) {
                 const grokEntity = tweet.entities.urls.find(u => 
                     u.expanded_url.includes('/grok/share') || u.expanded_url.includes('/i/grok/')
                 );
+
                 if (grokEntity) {
+                    grokShareUrl = grokEntity.expanded_url;
                     grokData = {
-                        url: grokEntity.expanded_url,
-                        // カードのタイトルが[USER]（質問）、説明文が[AGENT]（回答）になることが多い
+                        url: grokShareUrl,
+                        // リンクカードのタイトルを質問 [USER] とする
                         question: grokEntity.title || '', 
-                        answer: grokEntity.description || '' 
+                        // ディスクリプションは使用せず、本文をAGENTとするため空にする
+                        answer: '' 
                     };
                 }
             }
@@ -115,31 +120,53 @@
             // --- 出力生成 ---
             let output = '';
 
-            // 1行目: ユーザー名 @ID (日時) 本文(URL含む)
-            // 改行をスペースに置換して1行にまとめるか、本文の改行はそのままにするか。
-            // 指定のフォーマット「(日時) なんだこいつ〜」のように続けて表示します。
+            // 1. ヘッダー情報の生成
             const headerInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
-            output += `${headerInfo} ${tweet.text}`;
 
-            // Grok情報がある場合の追加フォーマット
+            // Grok共有リンクがある場合の特別フォーマット
             if (grokData) {
-                output += '\n\n[USER]\n';
-                output += grokData.question ? grokData.question : '(質問内容の取得に失敗しました)';
+                // 質問と、ツイート本文（コメント＋回答＋URL）を抽出
+                let agentContent = tweet.text;
+                let userComment = '';
+
+                // ツイート本文からGrok共有URLを抽出・除去
+                // URLに続くスペースも含めて除去する正規表現
+                const grokUrlRegex = new RegExp(`(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)\\s*`, 'g');
+                agentContent = agentContent.replace(grokUrlRegex, '').trim();
+
+                // URL除去後の残りをコメント＋回答とする
+                // Grokの回答は通常、質問（タイトル）の後に続くため、ツイート本文の残りを全てAGENT（回答）と見なします。
+
+                // 質問 (USER)
+                const questionText = grokData.question.trim() || '(質問内容の取得に失敗しました)';
                 
-                output += '\n\n[AGENT]\n';
-                output += grokData.answer ? grokData.answer : '(回答内容の取得に失敗しました)';
-            } 
-            // Grok以外のメディアURL処理（画像など）
-            else {
-                // 通常のメディア処理が必要ならここに記述（今回はGrok特化のため省略可だが残すなら以下）
-                if (tweet.media) {
-                    if (tweet.media.photos) output += '\n' + tweet.media.photos.map(p => cleanUrl(p.url)).join('\n');
-                    if (tweet.media.video) output += '\n' + cleanUrl(tweet.media.video.url);
+                // 回答 (AGENT)
+                const answerText = agentContent || '(回答内容がツイート本文に見つかりませんでした)';
+
+                // 出力フォーマットの構築
+                // ヘッダー行 (ユーザー情報と回答本文の最初の部分) + Grok URL
+                output += `${headerInfo} ${answerText.split('\n')[0].substring(0, 50)}...\n\n`; // コメントの体裁
+                output += `${grokShareUrl}\n`;
+                
+                output += `[USER]\n${questionText}\n`;
+                
+                // 回答本文全体（コメントやヘッダーが含まれる可能性がある）
+                output += `\n[AGENT]\n${answerText}\n`;
+
+
+            } else {
+                // 通常のツイート整形（以前のロジック）
+                const mainBodyLine = tweet.text;
+                const mainMediaLine = tweet.media ? (tweet.media.photos || []).map(p => cleanUrl(p.url)).concat(tweet.media.video ? [cleanUrl(tweet.media.video.url)] : []).join('\n') : '';
+
+                output += `${headerInfo}\n${mainBodyLine}`;
+                if (mainMediaLine) {
+                     output += '\n' + mainMediaLine;
                 }
             }
 
             // 最後に元ツイートのURL
-            output += `\n\n${tweet.url}`;
+            output += `\n${tweet.url}`;
 
             return output;
         }
@@ -149,7 +176,6 @@
             navigator.clipboard.writeText(content).then(() => {
                 alert('コピーしました！');
             }).catch(e => {
-                // フォールバック
                 const ta = document.createElement('textarea');
                 ta.value = content;
                 document.body.appendChild(ta);
