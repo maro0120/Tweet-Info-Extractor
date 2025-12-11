@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ツイート詳細取得</title>
+    <title>ツイート詳細取得 (Grok対応版)</title>
     <link rel="manifest" href="manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; background: #f5f8fa; }
@@ -26,8 +26,13 @@
         .copy-button:active { background-color: #096ba1; }
         .error { color: red; font-weight: bold; }
         .loading { color: #1da1f2; font-weight: bold; }
+        
+        /* 引用スタイル */
         .quoted-tweet { margin-top: 20px; padding: 15px; border-left: 5px solid #1da1f2; background: #eef5ff; border-radius: 6px; }
         .quoted-tweet .title { font-weight: bold; color: #1da1f2; margin-bottom: 10px; }
+        
+        /* Grok引用時の特別スタイル（必要であればJS側でclass付与も可能ですが、今回はテキスト表現で対応） */
+        
         .clearfix::after { content: ""; clear: both; display: table; }
 
     </style>
@@ -116,10 +121,9 @@
             const cleanUrl = (url) => {
                 try {
                     const parsedUrl = new URL(url);
-                    // ほとんどの場合、クエリパラメータを削除するだけで良い
                     return parsedUrl.origin + parsedUrl.pathname;
                 } catch (e) {
-                    return url; // パースに失敗したら元のURLを返す
+                    return url;
                 }
             };
 
@@ -127,20 +131,16 @@
             const getMediaUrls = (media) => {
                 let urls = [];
                 if (media && media.photos) {
-                    // **ここを修正:** photo.urlをcleanUrlに通す
                     urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
                 }
                 if (media && media.video) {
-                    // 動画URLもcleanUrlに通す
                     urls.push(cleanUrl(media.video.url)); 
                 }
                 
-                // YouTubeのサムネとURLは本文からの抽出に頼る
                 const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
                 const ytMatch = tweet.text.match(ytRegex);
                 if (ytMatch) {
                     const videoId = ytMatch[2];
-                    // YouTubeサムネイルは元々クエリパラメータを持たないクリーンなURLを生成
                     const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
                     urls.push(`[YouTube URL] ${ytMatch[0]}`);
                     urls.push(`[YouTube サムネ] ${ytThumb}`);
@@ -156,7 +156,7 @@
 
             const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
             const mainBodyLine = tweet.text;
-            const mainUrlLine = tweet.url; // ツイート自体のURLはパラメータを削除しない
+            const mainUrlLine = tweet.url; 
             const mainMediaLine = getMediaUrls(tweet.media);
 
             output += mainUserLine + '\n' + mainBodyLine;
@@ -166,15 +166,21 @@
             output += '\n' + mainUrlLine;
 
             // ------------------
-            // 引用ポストの処理
+            // 引用ポストの処理 (Grok対応)
             // ------------------
             if (quotedTweet) {
+                // Grok判定: IDが'grok'の場合
+                const isGrok = quotedTweet.author.screen_name.toLowerCase() === 'grok';
+                
+                // ヘッダーを切り替え
+                const quoteHeader = isGrok ? '\n\n[🤖 Grok]' : '\n\n[引用元]';
+                
                 const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
                 const quotedBodyLine = quotedTweet.text;
                 const quotedUrlLine = quotedTweet.url;
                 const quotedMediaLine = getMediaUrls(quotedTweet.media);
                 
-                output += '\n\n[引用元]\n';
+                output += quoteHeader + '\n';
                 output += quotedUserLine + '\n' + quotedBodyLine;
                 if (quotedMediaLine) {
                     output += '\n' + quotedMediaLine;
@@ -185,7 +191,7 @@
             return output.trim();
         }
 
-        // コピー処理 (前回のものと変更なし)
+        // コピー処理
         function copyToClipboard() {
             const content = document.getElementById('formattedOutput').textContent;
             
