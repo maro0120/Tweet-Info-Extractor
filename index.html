@@ -27,12 +27,8 @@
         .error { color: red; font-weight: bold; }
         .loading { color: #1da1f2; font-weight: bold; }
         
-        /* 引用スタイル */
         .quoted-tweet { margin-top: 20px; padding: 15px; border-left: 5px solid #1da1f2; background: #eef5ff; border-radius: 6px; }
         .quoted-tweet .title { font-weight: bold; color: #1da1f2; margin-bottom: 10px; }
-        
-        /* Grok引用時の特別スタイル（必要であればJS側でclass付与も可能ですが、今回はテキスト表現で対応） */
-        
         .clearfix::after { content: ""; clear: both; display: table; }
 
     </style>
@@ -117,7 +113,6 @@
                 }).replace(/\//g, '/').replace(' ', ' ');
             };
 
-            // URLのクエリパラメータを削除する関数
             const cleanUrl = (url) => {
                 try {
                     const parsedUrl = new URL(url);
@@ -127,8 +122,7 @@
                 }
             };
 
-
-            const getMediaUrls = (media) => {
+            const getMediaUrls = (media, text) => {
                 let urls = [];
                 if (media && media.photos) {
                     urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
@@ -138,7 +132,7 @@
                 }
                 
                 const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
-                const ytMatch = tweet.text.match(ytRegex);
+                const ytMatch = text && text.match(ytRegex);
                 if (ytMatch) {
                     const videoId = ytMatch[2];
                     const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
@@ -149,38 +143,93 @@
             };
 
             // ------------------
-            // メインツイート整形
+            // Grokシェアリンクの検出ロジック
             // ------------------
-            
+            const detectGrokLink = (t) => {
+                // ツイート内のURLエンティティを確認
+                // api.fxtwitter.com のレスポンス構造に依存しますが、通常 entities.urls または url.urls にあります
+                const urls = (t.entities && t.entities.urls) || [];
+                
+                // 本文内のURL文字列もチェック（エンティティが漏れる場合の保険）
+                const grokRegex = /(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)/;
+                const textMatch = t.text.match(grokRegex);
+
+                let grokUrl = null;
+                let pageTitle = null;
+
+                // 1. エンティティから探す（タイトル情報が取れる可能性があるため優先）
+                const foundEntity = urls.find(u => u.expanded_url && u.expanded_url.includes('/i/grok/share/'));
+                if (foundEntity) {
+                    grokUrl = foundEntity.expanded_url;
+                    // fxtwitter等はtitleを付与してくれる場合がある
+                    pageTitle = foundEntity.title || null; 
+                } 
+                // 2. エンティティになければテキストから探す
+                else if (textMatch) {
+                    grokUrl = textMatch[0];
+                }
+
+                return { grokUrl, pageTitle };
+            };
+
+            const grokInfo = detectGrokLink(tweet);
+
+            // ------------------
+            // 出力生成
+            // ------------------
             let output = '';
 
-            const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
-            const mainBodyLine = tweet.text;
-            const mainUrlLine = tweet.url; 
-            const mainMediaLine = getMediaUrls(tweet.media);
+            // ★ Grok共有リンクがある場合の特別フォーマット
+            if (grokInfo.grokUrl) {
+                const authorInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+                
+                // 本文からURLを除去して「回答」とする
+                // GrokのURLそのものをテキストから削除して見やすくする
+                let answerText = tweet.text.replace(grokInfo.grokUrl, '').trim();
 
-            output += mainUserLine + '\n' + mainBodyLine;
-            if (mainMediaLine) {
-                 output += '\n' + mainMediaLine;
+                output += `[🤖 Grok情報共有] ${authorInfo}\n\n`;
+                
+                // 質問（ページタイトルが取得できていればそれを、なければ仮置き）
+                if (grokInfo.pageTitle) {
+                    output += `[質問]\n${grokInfo.pageTitle}\n\n`;
+                } else {
+                    // タイトルがAPIから取れない場合、手動入力用に枠だけ用意するか、URLだけ表示
+                    output += `[質問]\n(共有リンクを参照)\n\n`;
+                }
+
+                output += `[回答]\n${answerText}\n\n`;
+                output += `[会話URL]\n${grokInfo.grokUrl}\n`;
+                
+                // Grok以外の添付メディアがあれば追加（稀だがスクショなど）
+                const otherMedia = getMediaUrls(tweet.media, tweet.text);
+                if (otherMedia) {
+                    output += '\n[その他添付]\n' + otherMedia;
+                }
+
+            } else {
+                // ★ 通常のツイート整形（以前のロジック）
+                const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+                const mainBodyLine = tweet.text;
+                const mainUrlLine = tweet.url; 
+                const mainMediaLine = getMediaUrls(tweet.media, tweet.text);
+
+                output += mainUserLine + '\n' + mainBodyLine;
+                if (mainMediaLine) {
+                     output += '\n' + mainMediaLine;
+                }
+                output += '\n' + mainUrlLine;
             }
-            output += '\n' + mainUrlLine;
 
             // ------------------
-            // 引用ポストの処理 (Grok対応)
+            // 引用ポストの処理
             // ------------------
             if (quotedTweet) {
-                // Grok判定: IDが'grok'の場合
-                const isGrok = quotedTweet.author.screen_name.toLowerCase() === 'grok';
-                
-                // ヘッダーを切り替え
-                const quoteHeader = isGrok ? '\n\n[🤖 Grok]' : '\n\n[引用元]';
-                
                 const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
                 const quotedBodyLine = quotedTweet.text;
                 const quotedUrlLine = quotedTweet.url;
-                const quotedMediaLine = getMediaUrls(quotedTweet.media);
+                const quotedMediaLine = getMediaUrls(quotedTweet.media, quotedTweet.text);
                 
-                output += quoteHeader + '\n';
+                output += '\n\n[引用元]\n';
                 output += quotedUserLine + '\n' + quotedBodyLine;
                 if (quotedMediaLine) {
                     output += '\n' + quotedMediaLine;
