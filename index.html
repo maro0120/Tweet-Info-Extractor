@@ -92,10 +92,14 @@
                 }).replace(/\//g, '/');
             };
 
+            // URLクリーンアップ
+            const cleanUrl = (u) => { try { return new URL(u).origin + new URL(u).pathname; } catch { return u; } };
+
             // Grok情報の抽出
             let grokData = null;
             let grokShareUrl = null;
 
+            // エンティティ(リンクカード情報)からGrokを探す
             if (tweet.entities && tweet.entities.urls) {
                 const grokEntity = tweet.entities.urls.find(u => 
                     u.expanded_url.includes('/grok/share') || u.expanded_url.includes('/i/grok/')
@@ -105,53 +109,60 @@
                     grokShareUrl = grokEntity.expanded_url;
                     grokData = {
                         url: grokShareUrl,
-                        // OGPタイトル/ディスクリプションからQ&Aを抽出
+                        // リンクカードのタイトルを質問 [USER] とする
                         question: grokEntity.title || '', 
-                        answer: grokEntity.description || '' 
+                        // ディスクリプションは使用せず、本文をAGENTとするため空にする
+                        answer: '' 
                     };
                 }
             }
 
             // --- 出力生成 ---
             let output = '';
+
+            // 1. ヘッダー情報の生成
             const headerInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
 
             // Grok共有リンクがある場合の特別フォーマット
             if (grokData) {
-                // 1. ツイート本文からGrok URLを除去したものを「コメント」として取得
-                const grokUrlRegex = new RegExp(`(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)`, 'g');
-                let userComment = tweet.text.replace(grokUrlRegex, '').trim();
+                // 質問と、ツイート本文（コメント＋回答＋URL）を抽出
+                let agentContent = tweet.text;
+                let userComment = '';
 
-                // 2. OGPデータから取得したQ&A
-                let questionText = grokData.question.trim();
-                let answerText = grokData.answer.trim();
+                // ツイート本文からGrok共有URLを抽出・除去
+                // URLに続くスペースも含めて除去する正規表現
+                const grokUrlRegex = new RegExp(`(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)\\s*`, 'g');
+                agentContent = agentContent.replace(grokUrlRegex, '').trim();
+
+                // URL除去後の残りをコメント＋回答とする
+                // Grokの回答は通常、質問（タイトル）の後に続くため、ツイート本文の残りを全てAGENT（回答）と見なします。
+
+                // 質問 (USER)
+                const questionText = grokData.question.trim() || '(質問内容の取得に失敗しました)';
                 
-                // --- ヘッダー行 ---
-                // ヘッダー + コメント + Grok URL の順で1行に出力（ご提示の例に合わせる）
-                output += `${headerInfo} ${userComment} ${grokShareUrl}\n`;
+                // 回答 (AGENT)
+                const answerText = agentContent || '(回答内容がツイート本文に見つかりませんでした)';
+
+                // 出力フォーマットの構築
+                // ヘッダー行 (ユーザー情報と回答本文の最初の部分) + Grok URL
+                output += `${headerInfo} ${answerText.split('\n')[0].substring(0, 50)}...\n\n`; // コメントの体裁
+                output += `${grokShareUrl}\n`;
                 
-                // --- Q&A部分 ---
-                output += `\n[USER]`;
-                if (questionText.startsWith('[USER]')) {
-                    // もしタイトル自体に [USER] が含まれていたら除去
-                    output += ` ${questionText.substring(6).trim()}\n`;
-                } else {
-                    output += `\n${questionText}\n`;
-                }
+                output += `[USER]\n${questionText}\n`;
                 
-                output += `\n[AGENT]`;
-                if (answerText.startsWith('[AGENT]')) {
-                    // もしディスクリプション自体に [AGENT] が含まれていたら除去
-                    output += ` ${answerText.substring(7).trim()}\n`;
-                } else {
-                    output += `\n${answerText}\n`;
-                }
+                // 回答本文全体（コメントやヘッダーが含まれる可能性がある）
+                output += `\n[AGENT]\n${answerText}\n`;
+
 
             } else {
-                // 通常のツイート整形
+                // 通常のツイート整形（以前のロジック）
                 const mainBodyLine = tweet.text;
-                // メディアURLの抽出は今回は省略
+                const mainMediaLine = tweet.media ? (tweet.media.photos || []).map(p => cleanUrl(p.url)).concat(tweet.media.video ? [cleanUrl(tweet.media.video.url)] : []).join('\n') : '';
+
                 output += `${headerInfo}\n${mainBodyLine}`;
+                if (mainMediaLine) {
+                     output += '\n' + mainMediaLine;
+                }
             }
 
             // 最後に元ツイートのURL
