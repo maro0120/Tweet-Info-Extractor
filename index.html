@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ツイート詳細取得 (Grok整形版)</title>
+    <title>ツイート詳細取得</title>
     <link rel="manifest" href="manifest.json">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; background: #f5f8fa; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); word-break: break-all; margin-bottom: 20px; }
         h2 { margin-top: 0; font-size: 18px; border-bottom: 2px solid #e1e8ed; padding-bottom: 10px; }
-        .info-display { white-space: pre-wrap; font-size: 14px; line-height: 1.6; padding: 15px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; color: #333; }
+        .info-display { white-space: pre-wrap; font-size: 14px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
         .copy-button { 
             background-color: #1da1f2; 
             color: white; 
@@ -23,9 +23,13 @@
             transition: background-color 0.2s;
         }
         .copy-button:hover { background-color: #0c85d0; }
+        .copy-button:active { background-color: #096ba1; }
         .error { color: red; font-weight: bold; }
         .loading { color: #1da1f2; font-weight: bold; }
+        .quoted-tweet { margin-top: 20px; padding: 15px; border-left: 5px solid #1da1f2; background: #eef5ff; border-radius: 6px; }
+        .quoted-tweet .title { font-weight: bold; color: #1da1f2; margin-bottom: 10px; }
         .clearfix::after { content: ""; clear: both; display: table; }
+
     </style>
 </head>
 <body>
@@ -53,14 +57,16 @@
             const match = (sharedUrl + " " + sharedText).match(urlRegex);
 
             if (match) {
-                fetchTweetData(match[0]);
+                const tweetUrl = match[0];
+                fetchTweetData(tweetUrl);
             } else {
-                document.getElementById('status').textContent = "URLが見つかりません。";
+                document.getElementById('status').textContent = "TwitterのURLが見つかりませんでした。共有メニューからツイートを共有してください。";
             }
         });
 
         async function fetchTweetData(url) {
             document.getElementById('status').textContent = "データ取得中...";
+            
             try {
                 const parts = url.split('/');
                 const tweetId = parts[parts.length - 1].split('?')[0];
@@ -70,120 +76,146 @@
                 if (!response.ok) throw new Error(`API Error: ${response.status}`);
                 
                 const data = await response.json();
-                const formattedText = formatTweet(data.tweet);
                 
+                const mainTweet = data.tweet;
+                const quotedTweet = data.tweet.quote ? data.tweet.quote : null;
+
+                const formattedText = formatTweet(mainTweet, quotedTweet);
                 document.getElementById('formattedOutput').textContent = formattedText;
+                
                 document.getElementById('status').style.display = 'none';
                 document.getElementById('result').style.display = 'block';
 
             } catch (e) {
                 console.error(e);
-                document.getElementById('status').innerHTML = `<span class="error">エラー: ${e.message}</span>`;
+                document.getElementById('status').innerHTML = `<span class="error">取得に失敗しました。<br>エラー: ${e.message}</span>`;
             }
         }
         
-        function formatTweet(tweet) {
-            // 日時整形
-            const toJST = (ts) => {
-                return new Date(ts * 1000).toLocaleString('ja-JP', {
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit',
-                    hour12: false, timeZone: 'Asia/Tokyo'
-                }).replace(/\//g, '/');
+        // ツイート情報を整形して文字列を生成する関数
+        function formatTweet(tweet, quotedTweet = null) {
+            
+            // ------------------
+            // ヘルパー関数
+            // ------------------
+            const toJST = (timestamp) => {
+                const date = new Date(timestamp * 1000); 
+                return date.toLocaleString('ja-JP', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                    timeZone: 'Asia/Tokyo'
+                }).replace(/\//g, '/').replace(' ', ' ');
             };
 
-            // URLクリーンアップ
-            const cleanUrl = (u) => { try { return new URL(u).origin + new URL(u).pathname; } catch { return u; } };
-
-            // Grok情報の抽出
-            let grokData = null;
-            let grokShareUrl = null;
-
-            // エンティティ(リンクカード情報)からGrokを探す
-            if (tweet.entities && tweet.entities.urls) {
-                const grokEntity = tweet.entities.urls.find(u => 
-                    u.expanded_url.includes('/grok/share') || u.expanded_url.includes('/i/grok/')
-                );
-
-                if (grokEntity) {
-                    grokShareUrl = grokEntity.expanded_url;
-                    grokData = {
-                        url: grokShareUrl,
-                        // リンクカードのタイトルを質問 [USER] とする
-                        question: grokEntity.title || '', 
-                        // ディスクリプションは使用せず、本文をAGENTとするため空にする
-                        answer: '' 
-                    };
+            // URLのクエリパラメータを削除する関数
+            const cleanUrl = (url) => {
+                try {
+                    const parsedUrl = new URL(url);
+                    // ほとんどの場合、クエリパラメータを削除するだけで良い
+                    return parsedUrl.origin + parsedUrl.pathname;
+                } catch (e) {
+                    return url; // パースに失敗したら元のURLを返す
                 }
-            }
+            };
 
-            // --- 出力生成 ---
+
+            const getMediaUrls = (media) => {
+                let urls = [];
+                if (media && media.photos) {
+                    // **ここを修正:** photo.urlをcleanUrlに通す
+                    urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
+                }
+                if (media && media.video) {
+                    // 動画URLもcleanUrlに通す
+                    urls.push(cleanUrl(media.video.url)); 
+                }
+                
+                // YouTubeのサムネとURLは本文からの抽出に頼る
+                const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11}))/;
+                const ytMatch = tweet.text.match(ytRegex);
+                if (ytMatch) {
+                    const videoId = ytMatch[2];
+                    // YouTubeサムネイルは元々クエリパラメータを持たないクリーンなURLを生成
+                    const ytThumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+                    urls.push(`[YouTube URL] ${ytMatch[0]}`);
+                    urls.push(`[YouTube サムネ] ${ytThumb}`);
+                }
+                return urls.join('\n');
+            };
+
+            // ------------------
+            // メインツイート整形
+            // ------------------
+            
             let output = '';
 
-            // 1. ヘッダー情報の生成
-            const headerInfo = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            const mainUserLine = `${tweet.author.name} @${tweet.author.screen_name} (${toJST(tweet.created_timestamp)})`;
+            const mainBodyLine = tweet.text;
+            const mainUrlLine = tweet.url; // ツイート自体のURLはパラメータを削除しない
+            const mainMediaLine = getMediaUrls(tweet.media);
 
-            // Grok共有リンクがある場合の特別フォーマット
-            if (grokData) {
-                // 質問と、ツイート本文（コメント＋回答＋URL）を抽出
-                let agentContent = tweet.text;
-                let userComment = '';
+            output += mainUserLine + '\n' + mainBodyLine;
+            if (mainMediaLine) {
+                 output += '\n' + mainMediaLine;
+            }
+            output += '\n' + mainUrlLine;
 
-                // ツイート本文からGrok共有URLを抽出・除去
-                // URLに続くスペースも含めて除去する正規表現
-                const grokUrlRegex = new RegExp(`(https?:\/\/(?:x\.com|twitter\.com)\/i\/grok\/share\/[a-zA-Z0-9-]+)\\s*`, 'g');
-                agentContent = agentContent.replace(grokUrlRegex, '').trim();
-
-                // URL除去後の残りをコメント＋回答とする
-                // Grokの回答は通常、質問（タイトル）の後に続くため、ツイート本文の残りを全てAGENT（回答）と見なします。
-
-                // 質問 (USER)
-                const questionText = grokData.question.trim() || '(質問内容の取得に失敗しました)';
+            // ------------------
+            // 引用ポストの処理
+            // ------------------
+            if (quotedTweet) {
+                const quotedUserLine = `${quotedTweet.author.name} @${quotedTweet.author.screen_name} (${toJST(quotedTweet.created_timestamp)})`;
+                const quotedBodyLine = quotedTweet.text;
+                const quotedUrlLine = quotedTweet.url;
+                const quotedMediaLine = getMediaUrls(quotedTweet.media);
                 
-                // 回答 (AGENT)
-                const answerText = agentContent || '(回答内容がツイート本文に見つかりませんでした)';
-
-                // 出力フォーマットの構築
-                // ヘッダー行 (ユーザー情報と回答本文の最初の部分) + Grok URL
-                output += `${headerInfo} ${answerText.split('\n')[0].substring(0, 50)}...\n\n`; // コメントの体裁
-                output += `${grokShareUrl}\n`;
-                
-                output += `[USER]\n${questionText}\n`;
-                
-                // 回答本文全体（コメントやヘッダーが含まれる可能性がある）
-                output += `\n[AGENT]\n${answerText}\n`;
-
-
-            } else {
-                // 通常のツイート整形（以前のロジック）
-                const mainBodyLine = tweet.text;
-                const mainMediaLine = tweet.media ? (tweet.media.photos || []).map(p => cleanUrl(p.url)).concat(tweet.media.video ? [cleanUrl(tweet.media.video.url)] : []).join('\n') : '';
-
-                output += `${headerInfo}\n${mainBodyLine}`;
-                if (mainMediaLine) {
-                     output += '\n' + mainMediaLine;
+                output += '\n\n[引用元]\n';
+                output += quotedUserLine + '\n' + quotedBodyLine;
+                if (quotedMediaLine) {
+                    output += '\n' + quotedMediaLine;
                 }
+                output += '\n' + quotedUrlLine;
             }
 
-            // 最後に元ツイートのURL
-            output += `\n${tweet.url}`;
-
-            return output;
+            return output.trim();
         }
 
+        // コピー処理 (前回のものと変更なし)
         function copyToClipboard() {
             const content = document.getElementById('formattedOutput').textContent;
-            navigator.clipboard.writeText(content).then(() => {
-                alert('コピーしました！');
-            }).catch(e => {
-                const ta = document.createElement('textarea');
-                ta.value = content;
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-                alert('コピーしました！');
-            });
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content).then(() => {
+                    alert('内容がクリップボードにコピーされました！');
+                    const btn = document.querySelector('.copy-button');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'コピー完了！';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                    }, 1500);
+                }).catch(err => {
+                    console.error('コピー失敗:', err);
+                    alert('コピーに失敗しました。手動でコピーしてください。');
+                });
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = content;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    alert('内容がクリップボードにコピーされました！');
+                } catch (err) {
+                    console.error('コピー失敗:', err);
+                    alert('コピーに失敗しました。手動でコピーしてください。');
+                }
+                document.body.removeChild(textarea);
+            }
         }
     </script>
 </body>
