@@ -103,15 +103,22 @@
 
             const cleanUrl = (u) => { try { return new URL(u).origin + new URL(u).pathname; } catch { return u; } };
 
+            // 【修正ポイント】メディアURLとALTテキストを取得
             const getMediaUrls = (media) => {
-                let urls = [];
+                let lines = [];
                 if (media && media.photos) {
-                    urls = urls.concat(media.photos.map(p => cleanUrl(p.url)));
+                    media.photos.forEach(p => {
+                        lines.push(cleanUrl(p.url));
+                        // ALTテキストが存在する場合、次の行に [ALT: ...] の形式で追加
+                        if (p.altText && p.altText.trim() !== "") {
+                            lines.push(`[ALT]\n ${p.altText}`);
+                        }
+                    });
                 }
                 if (media && media.video) {
-                    urls.push(cleanUrl(media.video.url)); 
+                    lines.push(cleanUrl(media.video.url)); 
                 }
-                return urls.join('\n');
+                return lines.join('\n');
             };
 
             // --- 出力生成 ---
