@@ -112,7 +112,7 @@
             threadTweets.forEach((t, index) => {
               const quotedTweet = t.quote ? t.quote : null;
               
-              formattedText += `=== 【階層 ${index + 1} / ${threadTweets.length}】 ===\n`;
+              // formattedText += `=== 【階層 ${index + 1} / ${threadTweets.length}】 ===\n`;
               formattedText += formatTweet(t, quotedTweet);
               formattedText += '\n\n';
             });
