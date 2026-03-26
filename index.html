@@ -59,56 +59,31 @@
             }
         });
 
-        async function fetchTweetData(url) {
-          document.getElementById('status').textContent = "スレッドを遡ってデータ取得中...";
-          try {
-            const parts = url.split('/');
-            let currentTweetId = parts[parts.length - 1].split('?')[0];
-            
-            const threadTweets = []; // 取得したツイート群を格納する配列
-        
-            // 親ツイートが存在する限りループして遡る
-            while (currentTweetId) {
-              document.getElementById('status').textContent = `データ取得中... (ID: ${currentTweetId})`;
-              
-              const apiUrl = `https://api.fxtwitter.com/status/${currentTweetId}`;
-              const response = await fetch(apiUrl);
-              if (!response.ok) throw new Error(`API Error: ${response.status}`);
-              
-              const data = await response.json();
-              const tweet = data.tweet;
-              
-              // スレッドの先頭（古いツイート）が上に来るように unshift で配列の先頭に追加
-              threadTweets.unshift(tweet);
-              
-              // 親ツイート（リプライ元）のIDを取得。なければ null になりループを抜ける
-              currentTweetId = tweet.replying_to_status || null;
-              
-              // APIサーバーへの負荷を考慮し、連続リクエストの間に1秒（1000ms）の待機を入れる
-              if (currentTweetId) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
-            }
-        
-            // 取得したスレッド全体を整形
-            let formattedText = '';
-            threadTweets.forEach((t, index) => {
-              const quotedTweet = t.quote ? t.quote : null;
-              
-              formattedText += `=== 【ツイート ${index + 1} / ${threadTweets.length}】 ===\n`;
-              formattedText += formatTweet(t, quotedTweet); // 既存の整形関数をそのまま利用
-              formattedText += '\n\n';
-            });
-        
-            document.getElementById('formattedOutput').textContent = formattedText.trim();
-            document.getElementById('status').style.display = 'none';
-            document.getElementById('result').style.display = 'block';
-        
-          } catch (e) {
-            console.error(e);
-            document.getElementById('status').innerHTML = `<span class="error">エラー: ${e.message}</span>`;
-          }
-        }
+async function fetchTweetData(url) {
+  document.getElementById('status').textContent = "デバッグモード：APIレスポンスを取得中...";
+  try {
+    const parts = url.split('/');
+    const tweetId = parts[parts.length - 1].split('?')[0];
+    const apiUrl = `https://api.fxtwitter.com/status/${tweetId}`;
+
+    const response = await fetch(apiUrl);
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+    const data = await response.json();
+
+    // 【デバッグ用】取得した生のJSONデータを整形して画面に表示
+    document.getElementById('formattedOutput').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('status').style.display = 'none';
+    document.getElementById('result').style.display = 'block';
+
+    // 開発者ツールのコンソールにも出力
+    console.log("API Response:", data);
+
+  } catch (e) {
+    console.error(e);
+    document.getElementById('status').innerHTML = `<span class="error">エラー: ${e.message}</span>`;
+  }
+}
         
         // ツイート情報を整形して文字列を生成する関数
         function formatTweet(tweet, quotedTweet = null) {
